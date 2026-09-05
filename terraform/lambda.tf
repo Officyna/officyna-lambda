@@ -92,7 +92,7 @@ resource "aws_lambda_function" "auth_lambda" {
       DB_NAME            = var.db_name
       DOCDB_TLS          = "true"
       DOCDB_TLS_CA_FILE  = "certs/global-bundle.pem"
-      MONGODB_URI        = var.docdb_endpoint != "" ? "mongodb://${var.db_username}:${urlencode(var.db_password)}@${var.docdb_endpoint}:27017/${var.db_name}?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false" : ""
+      MONGODB_URI        = var.docdb_endpoint != "" ? "mongodb://${var.db_username}:${urlencode(var.db_password)}@${var.docdb_endpoint}:27017/${var.db_name}?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false&authMechanism=SCRAM-SHA-1" : ""
     }
   }
 

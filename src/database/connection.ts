@@ -16,7 +16,8 @@ export async function getDatabase(): Promise<Db> {
     serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 5000,
     maxPoolSize: 10,
-    minPoolSize: 1
+    minPoolSize: 1,
+    authMechanism: 'SCRAM-SHA-1'
   };
 
   // Check for AWS DocumentDB CA Certificate

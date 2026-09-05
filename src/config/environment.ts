@@ -30,7 +30,7 @@ export function getConfig(): AppConfig {
     if (dbPassword) {
       const encodedPassword = encodeURIComponent(dbPassword);
       const tlsParams = tls
-        ? '?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false'
+        ? '?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false&authMechanism=SCRAM-SHA-1'
         : '';
       mongodbUri = `mongodb://${dbUser}:${encodedPassword}@${dbHost}:${dbPort}/${dbName}${tlsParams}`;
     } else {

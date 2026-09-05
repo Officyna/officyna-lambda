@@ -116,9 +116,9 @@ resource "aws_lambda_function_url" "auth_lambda_url" {
 }
 
 # 7. Permissão pública para invocação da Function URL
-resource "aws_lambda_permission" "auth_lambda_url_public" {
-  statement_id           = "FunctionURLAllowPublicAccess"
-  action                 = "lambda:InvokeFunctionUrl"
+resource "aws_lambda_permission" "auth_lambda_invoke_public" {
+  statement_id           = "AllowPublicInvokeViaUrl"
+  action                 = "lambda:InvokeFunction"
   function_name          = aws_lambda_function.auth_lambda.function_name
   principal              = "*"
   function_url_auth_type = "NONE"

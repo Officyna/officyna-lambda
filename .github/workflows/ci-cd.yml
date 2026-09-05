@@ -1,0 +1,246 @@
+name: Lambda CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - feat/146/lambda-autenticacao
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Ação a executar"
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+        default: apply
+      confirm:
+        description: 'Para destroy, digite "destroy" para confirmar'
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || secrets.AWS_REGION || 'us-east-1' }}
+  NODE_VERSION: "20"
+
+jobs:
+  # ==========================================
+  # JOB 1: Build e Testes Automatizados
+  # ==========================================
+  test-and-build:
+    name: Testes e Build
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar Dependências
+        run: npm ci || npm install
+
+      - name: Executar Testes Unitários com Cobertura
+        run: npm run test:coverage
+
+      - name: Build do Bundle da Lambda
+        run: npm run build
+
+      - name: Upload do Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-build
+          path: |
+            dist/
+            certs/
+          retention-days: 1
+
+  # ==========================================
+  # JOB 2: Terraform Plan (Pull Request)
+  # ==========================================
+  plan:
+    name: Terraform Plan
+    needs: test-and-build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-build
+          path: .
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Obter Endpoint do DocumentDB (SSM)
+        id: ssm
+        run: |
+          DOCDB_ENDPOINT=$(aws ssm get-parameter --name "/officyna/db/endpoint" --query "Parameter.Value" --output text 2>/dev/null || echo "")
+          echo "docdb_endpoint=$DOCDB_ENDPOINT" >> $GITHUB_OUTPUT
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Format Check
+        run: terraform fmt -check
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        env:
+          DOCDB_ENDPOINT: ${{ steps.ssm.outputs.docdb_endpoint || secrets.DOCDB_ENDPOINT }}
+        run: |
+          terraform plan \
+            -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="docdb_endpoint=$DOCDB_ENDPOINT"
+
+  # ==========================================
+  # JOB 3: Terraform Apply (Push em main)
+  # ==========================================
+  apply:
+    name: Terraform Apply
+    needs: test-and-build
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-build
+          path: .
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Obter Endpoint do DocumentDB (SSM)
+        id: ssm
+        run: |
+          DOCDB_ENDPOINT=$(aws ssm get-parameter --name "/officyna/db/endpoint" --query "Parameter.Value" --output text 2>/dev/null || echo "")
+          echo "docdb_endpoint=$DOCDB_ENDPOINT" >> $GITHUB_OUTPUT
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        id: tf-apply
+        env:
+          DOCDB_ENDPOINT: ${{ steps.ssm.outputs.docdb_endpoint || secrets.DOCDB_ENDPOINT }}
+        run: |
+          terraform apply -auto-approve \
+            -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="docdb_endpoint=$DOCDB_ENDPOINT"
+
+      - name: Liberar Permissão de Invocação da Function URL (AWS CLI)
+        run: |
+          aws lambda add-permission \
+            --function-name officyna-auth-lambda \
+            --statement-id AllowExecutionViaFunctionUrl \
+            --action lambda:InvokeFunction \
+            --principal "*" \
+            --invoked-via-function-url \
+            --region ${{ env.AWS_REGION }} || true
+
+      - name: Publicar URL da Função Lambda
+        run: |
+          FUNCTION_URL=$(terraform output -raw lambda_function_url 2>/dev/null || echo "N/A")
+          LAMBDA_ARN=$(terraform output -raw lambda_arn 2>/dev/null || echo "N/A")
+
+          echo "=================================================="
+          echo "🚀 LAMBDA ARN:  $LAMBDA_ARN"
+          echo "🌐 FUNCTION URL: $FUNCTION_URL"
+          echo "=================================================="
+
+          echo "## ⚡ Deploy da Lambda Concluído!" >> $GITHUB_STEP_SUMMARY
+          echo "| Recurso | Detalhes |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⚡ **Lambda ARN** | \`$LAMBDA_ARN\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌐 **Function URL** | \`$FUNCTION_URL\` |" >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================
+  # JOB 4: Terraform Destroy (Manual)
+  # ==========================================
+  destroy:
+    name: Terraform Destroy (Manual)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy' && github.event.inputs.confirm == 'destroy'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Garantir pasta dist dummy para o Terraform
+        run: |
+          mkdir -p ../dist
+          touch ../dist/index.js
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Destroy
+        run: |
+          terraform destroy -auto-approve -input=false \
+            -var="jwt_secret=${{ secrets.JWT_SECRET || 'officyna-secret-key-change-in-production-min-256bits' }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD || 'dummy' }}"

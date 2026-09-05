@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_REGION: ${{ vars.AWS_REGION || secrets.AWS_REGION || 'us-east-1' }}
   NODE_VERSION: "20"
 
 jobs:
@@ -36,6 +36,7 @@ jobs:
   # ==========================================
   test-and-build:
     name: Testes e Build
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do código
@@ -209,12 +210,19 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy' && github.event.inputs.confirm == 'destroy'
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: terraform
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
+
+      - name: Garantir pasta dist dummy para o Terraform
+        run: |
+          mkdir -p ../dist
+          touch ../dist/index.js
 
       - name: Configurar Credenciais AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -233,6 +241,6 @@ jobs:
 
       - name: Terraform Destroy
         run: |
-          terraform destroy -auto-approve \
-            -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
-            -var="db_password=${{ secrets.DB_PASSWORD }}"
+          terraform destroy -auto-approve -input=false \
+            -var="jwt_secret=${{ secrets.JWT_SECRET || 'officyna-secret-key-change-in-production-min-256bits' }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD || 'dummy' }}"

@@ -175,6 +175,16 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="docdb_endpoint=$DOCDB_ENDPOINT"
 
+      - name: Liberar Permissão de Invocação da Function URL (AWS CLI)
+        run: |
+          aws lambda add-permission \
+            --function-name officyna-auth-lambda \
+            --statement-id AllowExecutionViaFunctionUrl \
+            --action lambda:InvokeFunction \
+            --principal "*" \
+            --invoked-via-function-url \
+            --region ${{ env.AWS_REGION }} || true
+
       - name: Publicar URL da Função Lambda
         run: |
           FUNCTION_URL=$(terraform output -raw lambda_function_url 2>/dev/null || echo "N/A")

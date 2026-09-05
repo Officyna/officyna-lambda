@@ -124,13 +124,4 @@ resource "aws_lambda_permission" "auth_lambda_invoke_public" {
   function_url_auth_type = "NONE"
 }
 
-# 8. Permissão pública para execução da Lambda via Function URL (requisito obrigatório da AWS desde Out/2025)
-resource "aws_lambda_permission" "auth_lambda_execution_via_url" {
-  statement_id             = "AllowExecutionViaFunctionUrl"
-  action                   = "lambda:InvokeFunction"
-  function_name            = aws_lambda_function.auth_lambda.function_name
-  principal                = "*"
-  invoked_via_function_url = true
-}
-
 

@@ -1,4 +1,26 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
 .DS_Store
 .idea/
 .vscode/
-*.log
+.env
+.env.local
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!terraform.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+lambda.zip

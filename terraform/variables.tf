@@ -13,14 +13,21 @@ variable "project_name" {
 variable "vpc_id" {
   description = "ID da VPC existente onde o DocumentDB está provisionado"
   type        = string
-  default     = "vpc-01198adba51551838"
+  default     = "vpc-015c101f7909140ec"
 }
 
 variable "subnet_ids" {
   description = "Lista de subnets privadas para execução da Lambda na VPC"
   type        = list(string)
-  default     = ["subnet-094a4756371abb5f2", "subnet-0a04000aa0846c777"]
+  default     = ["subnet-0eb33d3cb8ba2599b", "subnet-0b636d9d1625593b6", "subnet-039d5ca581769bd72"]
 }
+
+
+
+
+
+
+
 
 variable "jwt_secret" {
   description = "Secret chave para assinatura do token JWT"

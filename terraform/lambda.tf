@@ -14,6 +14,27 @@ data "archive_file" "lambda_zip" {
   }
 }
 
+# 1. Busca a VPC pelo projeto
+data "aws_vpc" "selected" {
+  filter {
+    name   = "tag:Project"
+    values = ["Officyna"]
+  }
+}
+
+
+# 2. Busca todas as subnets privadas associadas a essa VPC que tenham a tag Type = private
+data "aws_subnets" "private" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.selected.id]
+  }
+
+  tags = {
+    Type = "private"
+  }
+}
+
 # 2. IAM Role para execução da Lambda
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-role"
@@ -42,7 +63,7 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
 resource "aws_security_group" "lambda_sg" {
   name        = "${var.project_name}-sg"
   description = "Security group para a Lambda de autenticacao com acesso ao DocumentDB"
-  vpc_id      = var.vpc_id
+  vpc_id      = data.aws_vpc.selected.id
 
   egress {
     description = "Acesso ao DocumentDB"
@@ -60,6 +81,14 @@ resource "aws_security_group" "lambda_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  egress {
+    description = "Resolução de DNS"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   tags = {
     Name = "${var.project_name}-sg"
   }
@@ -67,39 +96,77 @@ resource "aws_security_group" "lambda_sg" {
 
 # 5. Criação da Função AWS Lambda
 resource "aws_lambda_function" "auth_lambda" {
-  function_name    = var.project_name
-  role             = aws_iam_role.lambda_exec.arn
-  runtime          = "nodejs20.x"
-  handler          = "index.handler"
+  function_name = var.project_name
+  role          = aws_iam_role.lambda_exec.arn
+
+  runtime = "nodejs20.x"
+
+  # Handler do New Relic
+  handler = "newrelic-lambda-wrapper.handler"
+
   filename         = data.archive_file.lambda_zip.output_path
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  memory_size      = 256
-  timeout          = 15
+
+  memory_size = 256
+  timeout     = 15
+
+  # New Relic Lambda Layer
+  #
+  # Coloque aqui o ARN da Layer Node.js 20
+  # correspondente a us-east-1 e à arquitetura da Lambda.
+  layers = [
+    var.new_relic_layer_arn
+  ]
 
   vpc_config {
-    subnet_ids         = var.subnet_ids
+    subnet_ids         = data.aws_subnets.private.ids # <--- Lista automática de IDs
     security_group_ids = [aws_security_group.lambda_sg.id]
   }
 
   environment {
     variables = {
-      NODE_ENV           = "production"
-      JWT_SECRET         = var.jwt_secret
-      JWT_EXPIRATION     = var.jwt_expiration
-      DOCDB_ENDPOINT     = var.docdb_endpoint
-      DB_USERNAME        = var.db_username
-      DB_PASSWORD        = var.db_password
-      DB_NAME            = var.db_name
-      DOCDB_TLS          = "true"
-      DOCDB_TLS_CA_FILE  = "certs/global-bundle.pem"
-      MONGODB_URI        = var.docdb_endpoint != "" ? "mongodb://${var.db_username}:${urlencode(var.db_password)}@${var.docdb_endpoint}:27017/${var.db_name}?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false&authMechanism=SCRAM-SHA-1" : ""
+      # ==========================================
+      # Aplicacao
+      # ==========================================
+      NODE_ENV       = "production"
+      JWT_SECRET     = var.jwt_secret
+      JWT_EXPIRATION = var.jwt_expiration
+
+      # ==========================================
+      # DocumentDB
+      # ==========================================
+      DOCDB_ENDPOINT    = var.docdb_endpoint
+      DB_USERNAME       = var.db_username
+      DB_PASSWORD       = var.db_password
+      DB_NAME           = var.db_name
+      DOCDB_TLS         = "true"
+      DOCDB_TLS_CA_FILE = "certs/global-bundle.pem"
+
+      MONGODB_URI = var.docdb_endpoint != "" ? "mongodb://${var.db_username}:${urlencode(var.db_password)}@${var.docdb_endpoint}:27017/${var.db_name}?tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false&authMechanism=SCRAM-SHA-1" : ""
+
+      # ==========================================
+      # New Relic
+      # ==========================================
+
+      NEW_RELIC_LAMBDA_HANDLER              = "index.handler"
+      NEW_RELIC_LICENSE_KEY                 = var.new_relic_license_key
+      NEW_RELIC_ACCOUNT_ID                  = var.new_relic_account_id
+      NEW_RELIC_APM_LAMBDA_MODE             = "true"
+      NEW_RELIC_DISTRIBUTED_TRACING_ENABLED = "true"
+      NEW_RELIC_TRUSTED_ACCOUNT_KEY         = var.new_relic_account_id
+      NEW_RELIC_EXEC_WRAPPER                = "/opt/othervendor/newrelic-lambda-wrapper"
     }
+  }
+
+  tags = {
+    "NR.Apm.Lambda.Mode" = "true"
   }
 
   depends_on = [
     aws_iam_role_policy_attachment.lambda_vpc_access
   ]
 }
+
 
 # 6. Function URL pública (para invocação direta / integração com Kong Gateway)
 resource "aws_lambda_function_url" "auth_lambda_url" {

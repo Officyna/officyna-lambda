@@ -22,12 +22,21 @@ variable "subnet_ids" {
   default     = ["subnet-0eb33d3cb8ba2599b", "subnet-0b636d9d1625593b6", "subnet-039d5ca581769bd72"]
 }
 
+variable "new_relic_license_key" {
+  description = "New Relic ingest license key"
+  type        = string
+  sensitive   = true
+}
 
+variable "new_relic_account_id" {
+  description = "New Relic account ID"
+  type        = string
+}
 
-
-
-
-
+variable "new_relic_layer_arn" {
+  description = "ARN da New Relic Lambda Layer para Node.js"
+  type        = string
+}
 
 variable "jwt_secret" {
   description = "Secret chave para assinatura do token JWT"

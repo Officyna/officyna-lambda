@@ -1,6 +1,10 @@
 import jwt from 'jsonwebtoken';
 import { getConfig } from '../config/environment';
 import { CustomerAuthResult } from '../models/customer';
+import {
+  logError,
+  logInfo
+} from '../utils/logger';
 
 export interface JwtTokenResult {
   token: string;
@@ -8,7 +12,9 @@ export interface JwtTokenResult {
   expiresIn: number;
 }
 
-export function generateCustomerToken(customer: CustomerAuthResult): JwtTokenResult {
+export function generateCustomerToken(
+    customer: CustomerAuthResult
+): JwtTokenResult {
   const config = getConfig();
 
   const payload = {
@@ -21,26 +27,69 @@ export function generateCustomerToken(customer: CustomerAuthResult): JwtTokenRes
     type: 'CUSTOMER'
   };
 
-  const expiresInSeconds = Math.floor(config.jwtExpirationMs / 1000);
+  const expiresInSeconds =
+      Math.floor(
+          config.jwtExpirationMs / 1000
+      );
 
-  const token = jwt.sign(payload, config.jwtSecret, {
-    subject: customer.email || customer.document,
-    issuer: config.jwtIssuer,
-    expiresIn: expiresInSeconds,
-    algorithm: 'HS256'
-  });
+  try {
+    const token = jwt.sign(
+        payload,
+        config.jwtSecret,
+        {
+          subject:
+              customer.email ||
+              customer.document,
+          issuer: config.jwtIssuer,
+          expiresIn: expiresInSeconds,
+          algorithm: 'HS256'
+        }
+    );
 
-  return {
-    token,
-    type: 'Bearer',
-    expiresIn: config.jwtExpirationMs
-  };
+    logInfo('JWT_TOKEN_CREATED', {
+      algorithm: 'HS256',
+      expiresInSeconds
+    });
+
+    return {
+      token,
+      type: 'Bearer',
+      expiresIn: config.jwtExpirationMs
+    };
+  } catch (error: unknown) {
+    logError(
+        'JWT_TOKEN_CREATION_ERROR',
+        error
+    );
+
+    throw error;
+  }
 }
 
-export function verifyToken(token: string): jwt.JwtPayload | string {
+export function verifyToken(
+    token: string
+): jwt.JwtPayload | string {
   const config = getConfig();
-  return jwt.verify(token, config.jwtSecret, {
-    algorithms: ['HS256'],
-    issuer: config.jwtIssuer
-  });
+
+  try {
+    const decodedToken = jwt.verify(
+        token,
+        config.jwtSecret,
+        {
+          algorithms: ['HS256'],
+          issuer: config.jwtIssuer
+        }
+    );
+
+    logInfo('JWT_TOKEN_VERIFIED');
+
+    return decodedToken;
+  } catch (error: unknown) {
+    logError(
+        'JWT_TOKEN_VERIFICATION_ERROR',
+        error
+    );
+
+    throw error;
+  }
 }

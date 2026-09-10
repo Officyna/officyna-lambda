@@ -82,7 +82,7 @@ resource "aws_security_group" "lambda_sg" {
   }
 
   egress {
-    description = "Resolução de DNS"
+    description = "Resolucao de DNS"
     from_port   = 53
     to_port     = 53
     protocol    = "udp"

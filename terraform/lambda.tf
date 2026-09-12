@@ -14,27 +14,6 @@ data "archive_file" "lambda_zip" {
   }
 }
 
-# 1. Busca a VPC pelo projeto
-data "aws_vpc" "selected" {
-  filter {
-    name   = "tag:Project"
-    values = ["Officyna"]
-  }
-}
-
-
-# 2. Busca todas as subnets privadas associadas a essa VPC que tenham a tag Type = private
-data "aws_subnets" "private" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.selected.id]
-  }
-
-  tags = {
-    Type = "private"
-  }
-}
-
 # 2. IAM Role para execução da Lambda
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-role"
@@ -63,7 +42,7 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
 resource "aws_security_group" "lambda_sg" {
   name        = "${var.project_name}-sg"
   description = "Security group para a Lambda de autenticacao com acesso ao DocumentDB"
-  vpc_id      = data.aws_vpc.selected.id
+  vpc_id      = var.vpc_id
 
   egress {
     description = "Acesso ao DocumentDB"
@@ -119,7 +98,7 @@ resource "aws_lambda_function" "auth_lambda" {
   ]
 
   vpc_config {
-    subnet_ids         = data.aws_subnets.private.ids # <--- Lista automática de IDs
+    subnet_ids         = var.subnet_ids
     security_group_ids = [aws_security_group.lambda_sg.id]
   }
 
@@ -191,4 +170,9 @@ resource "aws_lambda_permission" "auth_lambda_invoke_public" {
   function_url_auth_type = "NONE"
 }
 
-
+resource "aws_lambda_permission" "auth_lambda_invoke_function_public" {
+  statement_id  = "AllowPublicInvokeFunction"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.auth_lambda.function_name
+  principal     = "*"
+}

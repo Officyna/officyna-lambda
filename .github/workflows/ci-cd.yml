@@ -113,6 +113,15 @@ jobs:
           DOCDB_ENDPOINT=$(aws ssm get-parameter --name "/officyna/db/endpoint" --query "Parameter.Value" --output text 2>/dev/null || echo "")
           echo "docdb_endpoint=$DOCDB_ENDPOINT" >> $GITHUB_OUTPUT
 
+      - name: Obter Rede da VPC (SSM Parameter Store)
+        id: network
+        run: |
+          VPC_ID=$(aws ssm get-parameter --name "/officyna/network/vpc_id" --query "Parameter.Value" --output text)
+          SUBNET_IDS=$(aws ssm get-parameter --name "/officyna/network/subnet_ids" --query "Parameter.Value" --output text)
+
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+          echo "subnet_ids=$SUBNET_IDS" >> "$GITHUB_OUTPUT"
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -140,7 +149,9 @@ jobs:
           terraform plan \
             -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
-            -var="docdb_endpoint=$DOCDB_ENDPOINT"
+            -var="docdb_endpoint=$DOCDB_ENDPOINT" \
+            -var="vpc_id=${{ steps.network.outputs.vpc_id }}" \
+            -var='subnet_ids=${{ steps.network.outputs.subnet_ids }}'
 
 
   # ==========================================
@@ -183,6 +194,15 @@ jobs:
           DOCDB_ENDPOINT=$(aws ssm get-parameter --name "/officyna/db/endpoint" --query "Parameter.Value" --output text 2>/dev/null || echo "")
           echo "docdb_endpoint=$DOCDB_ENDPOINT" >> $GITHUB_OUTPUT
 
+      - name: Obter Rede da VPC (SSM Parameter Store)
+        id: network
+        run: |
+          VPC_ID=$(aws ssm get-parameter --name "/officyna/network/vpc_id" --query "Parameter.Value" --output text)
+          SUBNET_IDS=$(aws ssm get-parameter --name "/officyna/network/subnet_ids" --query "Parameter.Value" --output text)
+
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+          echo "subnet_ids=$SUBNET_IDS" >> "$GITHUB_OUTPUT"
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -206,7 +226,9 @@ jobs:
           terraform apply -auto-approve \
             -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
-            -var="docdb_endpoint=$DOCDB_ENDPOINT"
+            -var="docdb_endpoint=$DOCDB_ENDPOINT" \
+            -var="vpc_id=${{ steps.network.outputs.vpc_id }}" \
+            -var='subnet_ids=${{ steps.network.outputs.subnet_ids }}'
 
       - name: Liberar Permissão de Invocação da Function URL
         run: |
@@ -268,6 +290,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Obter Rede da VPC (SSM Parameter Store)
+        id: network
+        run: |
+          VPC_ID=$(aws ssm get-parameter --name "/officyna/network/vpc_id" --query "Parameter.Value" --output text)
+          SUBNET_IDS=$(aws ssm get-parameter --name "/officyna/network/subnet_ids" --query "Parameter.Value" --output text)
+
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+          echo "subnet_ids=$SUBNET_IDS" >> "$GITHUB_OUTPUT"
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -288,4 +319,6 @@ jobs:
             -input=false \
             -var="jwt_secret=${{ secrets.JWT_SECRET || 'officyna-secret-key-change-in-production-min-256bits' }}" \
             -var="db_password=${{ secrets.DB_PASSWORD || 'dummy' }}" \
-            -var="docdb_endpoint=${{ secrets.DOCDB_ENDPOINT || '' }}"
+            -var="docdb_endpoint=${{ secrets.DOCDB_ENDPOINT || '' }}" \
+            -var="vpc_id=${{ steps.network.outputs.vpc_id }}" \
+            -var='subnet_ids=${{ steps.network.outputs.subnet_ids }}'

@@ -11,23 +11,30 @@ variable "project_name" {
 }
 
 variable "vpc_id" {
-  description = "ID da VPC existente onde o DocumentDB está provisionado"
+  description = "ID da VPC existente onde o DocumentDB está provisionado (lido do SSM Parameter Store, publicado pelo officyna-infra-db)"
   type        = string
-  default     = "vpc-015c101f7909140ec"
 }
 
 variable "subnet_ids" {
-  description = "Lista de subnets privadas para execução da Lambda na VPC"
+  description = "Lista de subnets para execução da Lambda na VPC (lido do SSM Parameter Store, publicado pelo officyna-infra-db)"
   type        = list(string)
-  default     = ["subnet-0eb33d3cb8ba2599b", "subnet-0b636d9d1625593b6", "subnet-039d5ca581769bd72"]
 }
 
+variable "new_relic_license_key" {
+  description = "New Relic ingest license key"
+  type        = string
+  sensitive   = true
+}
 
+variable "new_relic_account_id" {
+  description = "New Relic account ID"
+  type        = string
+}
 
-
-
-
-
+variable "new_relic_layer_arn" {
+  description = "ARN da New Relic Lambda Layer para Node.js"
+  type        = string
+}
 
 variable "jwt_secret" {
   description = "Secret chave para assinatura do token JWT"

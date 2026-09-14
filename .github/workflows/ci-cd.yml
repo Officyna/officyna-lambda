@@ -5,9 +5,11 @@ on:
     branches:
       - main
       - feat/146/lambda-autenticacao
+
   pull_request:
     branches:
       - main
+
   workflow_dispatch:
     inputs:
       action:
@@ -18,6 +20,7 @@ on:
           - apply
           - destroy
         default: apply
+
       confirm:
         description: 'Para destroy, digite "destroy" para confirmar'
         required: false
@@ -31,6 +34,7 @@ env:
   NODE_VERSION: "20"
 
 jobs:
+
   # ==========================================
   # JOB 1: Build e Testes Automatizados
   # ==========================================
@@ -38,7 +42,9 @@ jobs:
     name: Testes e Build
     if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
     runs-on: ubuntu-latest
+
     steps:
+
       - name: Checkout do código
         uses: actions/checkout@v4
 
@@ -66,18 +72,25 @@ jobs:
             certs/
           retention-days: 1
 
+
   # ==========================================
-  # JOB 2: Terraform Plan (Pull Request)
+  # JOB 2: Terraform Plan - Pull Request
   # ==========================================
   plan:
     name: Terraform Plan
+
     needs: test-and-build
+
     if: github.event_name == 'pull_request'
+
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: terraform
+
     steps:
+
       - name: Checkout do código
         uses: actions/checkout@v4
 
@@ -99,6 +112,15 @@ jobs:
         run: |
           DOCDB_ENDPOINT=$(aws ssm get-parameter --name "/officyna/db/endpoint" --query "Parameter.Value" --output text 2>/dev/null || echo "")
           echo "docdb_endpoint=$DOCDB_ENDPOINT" >> $GITHUB_OUTPUT
+
+      - name: Obter Rede da VPC (SSM Parameter Store)
+        id: network
+        run: |
+          VPC_ID=$(aws ssm get-parameter --name "/officyna/network/vpc_id" --query "Parameter.Value" --output text)
+          SUBNET_IDS=$(aws ssm get-parameter --name "/officyna/network/subnet_ids" --query "Parameter.Value" --output text)
+
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+          echo "subnet_ids=$SUBNET_IDS" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -117,25 +139,39 @@ jobs:
       - name: Terraform Plan
         env:
           DOCDB_ENDPOINT: ${{ steps.ssm.outputs.docdb_endpoint || secrets.DOCDB_ENDPOINT }}
+
+          # New Relic
+          TF_VAR_new_relic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          TF_VAR_new_relic_account_id: ${{ vars.NEW_RELIC_ACCOUNT_ID }}
+          TF_VAR_new_relic_layer_arn: ${{ vars.NEW_RELIC_LAYER_ARN }}
+
         run: |
           terraform plan \
             -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
-            -var="docdb_endpoint=$DOCDB_ENDPOINT"
+            -var="docdb_endpoint=$DOCDB_ENDPOINT" \
+            -var="vpc_id=${{ steps.network.outputs.vpc_id }}" \
+            -var='subnet_ids=${{ steps.network.outputs.subnet_ids }}'
+
 
   # ==========================================
-  # JOB 3: Terraform Apply (Push em main)
+  # JOB 3: Terraform Apply
   # ==========================================
   apply:
     name: Terraform Apply
+
     needs: test-and-build
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
     runs-on: ubuntu-latest
+
     environment: production
+
     defaults:
       run:
         working-directory: terraform
+
     steps:
+
       - name: Checkout do código
         uses: actions/checkout@v4
 
@@ -158,6 +194,15 @@ jobs:
           DOCDB_ENDPOINT=$(aws ssm get-parameter --name "/officyna/db/endpoint" --query "Parameter.Value" --output text 2>/dev/null || echo "")
           echo "docdb_endpoint=$DOCDB_ENDPOINT" >> $GITHUB_OUTPUT
 
+      - name: Obter Rede da VPC (SSM Parameter Store)
+        id: network
+        run: |
+          VPC_ID=$(aws ssm get-parameter --name "/officyna/network/vpc_id" --query "Parameter.Value" --output text)
+          SUBNET_IDS=$(aws ssm get-parameter --name "/officyna/network/subnet_ids" --query "Parameter.Value" --output text)
+
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+          echo "subnet_ids=$SUBNET_IDS" >> "$GITHUB_OUTPUT"
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -168,22 +213,31 @@ jobs:
 
       - name: Terraform Apply
         id: tf-apply
+
         env:
           DOCDB_ENDPOINT: ${{ steps.ssm.outputs.docdb_endpoint || secrets.DOCDB_ENDPOINT }}
+
+          # New Relic
+          TF_VAR_new_relic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          TF_VAR_new_relic_account_id: ${{ vars.NEW_RELIC_ACCOUNT_ID }}
+          TF_VAR_new_relic_layer_arn: ${{ vars.NEW_RELIC_LAYER_ARN }}
+
         run: |
           terraform apply -auto-approve \
             -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
-            -var="docdb_endpoint=$DOCDB_ENDPOINT"
+            -var="docdb_endpoint=$DOCDB_ENDPOINT" \
+            -var="vpc_id=${{ steps.network.outputs.vpc_id }}" \
+            -var='subnet_ids=${{ steps.network.outputs.subnet_ids }}'
 
-      - name: Liberar Permissão de Invocação da Function URL (AWS CLI)
+      - name: Liberar Permissão de Invocação da Function URL
         run: |
           aws lambda add-permission \
             --function-name officyna-auth-lambda \
             --statement-id AllowExecutionViaFunctionUrl \
-            --action lambda:InvokeFunction \
+            --action lambda:InvokeFunctionUrl \
             --principal "*" \
-            --invoked-via-function-url \
+            --function-url-auth-type NONE \
             --region ${{ env.AWS_REGION }} || true
 
       - name: Publicar URL da Função Lambda
@@ -203,19 +257,24 @@ jobs:
           echo "| 🌐 **Function URL** | \`$FUNCTION_URL\` |" >> $GITHUB_STEP_SUMMARY
 
   # ==========================================
-  # JOB 4: Terraform Destroy (Manual)
+  # JOB 4: Terraform Destroy
   # ==========================================
   destroy:
     name: Terraform Destroy (Manual)
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy' && github.event.inputs.confirm == 'destroy'
     runs-on: ubuntu-latest
+
     environment: production
+
     permissions:
       contents: read
+
     defaults:
       run:
         working-directory: terraform
+
     steps:
+
       - name: Checkout do código
         uses: actions/checkout@v4
 
@@ -231,6 +290,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Obter Rede da VPC (SSM Parameter Store)
+        id: network
+        run: |
+          VPC_ID=$(aws ssm get-parameter --name "/officyna/network/vpc_id" --query "Parameter.Value" --output text)
+          SUBNET_IDS=$(aws ssm get-parameter --name "/officyna/network/subnet_ids" --query "Parameter.Value" --output text)
+
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+          echo "subnet_ids=$SUBNET_IDS" >> "$GITHUB_OUTPUT"
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -240,7 +308,17 @@ jobs:
         run: terraform init
 
       - name: Terraform Destroy
+        env:
+          TF_VAR_new_relic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          TF_VAR_new_relic_account_id: ${{ vars.NEW_RELIC_ACCOUNT_ID }}
+          TF_VAR_new_relic_layer_arn: ${{ vars.NEW_RELIC_LAYER_ARN }}
+
         run: |
-          terraform destroy -auto-approve -input=false \
+          terraform destroy \
+            -auto-approve \
+            -input=false \
             -var="jwt_secret=${{ secrets.JWT_SECRET || 'officyna-secret-key-change-in-production-min-256bits' }}" \
-            -var="db_password=${{ secrets.DB_PASSWORD || 'dummy' }}"
+            -var="db_password=${{ secrets.DB_PASSWORD || 'dummy' }}" \
+            -var="docdb_endpoint=${{ secrets.DOCDB_ENDPOINT || '' }}" \
+            -var="vpc_id=${{ steps.network.outputs.vpc_id }}" \
+            -var='subnet_ids=${{ steps.network.outputs.subnet_ids }}'

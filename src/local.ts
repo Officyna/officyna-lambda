@@ -2,6 +2,10 @@ import * as http from 'http';
 import { handler } from './index';
 import { APIGatewayProxyEvent } from 'aws-lambda';
 import * as dotenv from 'dotenv';
+import {
+  logError,
+  logInfo
+} from './utils/logger';
 
 dotenv.config();
 
@@ -13,27 +17,64 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
+          if (
+              req.method === 'OPTIONS'
+          ) {
+            logInfo(
+                'LOCAL_CORS_PREFLIGHT_REQUEST'
+            );
 
-  // Health check endpoint
-  if (req.url === '/health' || req.url === '/actuator/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'UP', service: 'officyna-lambda' }));
-    return;
-  }
+            res.writeHead(200);
+            res.end();
 
-  let body = '';
-  req.on('data', chunk => {
-    body += chunk;
-  });
+            return;
+          }
 
-  req.on('end', async () => {
-    try {
-      const url = new URL(req.url || '/', `http://localhost:${PORT}`);
+          if (
+              req.url === '/health' ||
+              req.url === '/actuator/health'
+          ) {
+            logInfo(
+                'LOCAL_HEALTH_CHECK'
+            );
+
+            res.writeHead(
+                200,
+                {
+                  'Content-Type':
+                      'application/json'
+                }
+            );
+
+            res.end(
+                JSON.stringify({
+                  status: 'UP',
+                  service:
+                      'officyna-lambda'
+                })
+            );
+
+            return;
+          }
+
+          let body = '';
+
+          req.on(
+              'data',
+              chunk => {
+                body += chunk;
+              }
+          );
+
+          req.on(
+              'end',
+              async () => {
+                try {
+                  const url =
+                      new URL(
+                          req.url || '/',
+                          `http://localhost:${PORT}`
+                      );
 
       const proxyEvent: APIGatewayProxyEvent = {
         body,
@@ -85,28 +126,97 @@ const server = http.createServer(async (req, res) => {
         body: string;
       };
 
-      res.writeHead(result.statusCode || 200, {
-        'Content-Type': 'application/json',
-        ...(result.headers || {})
-      });
-      res.end(result.body);
+                  logInfo(
+                      'LOCAL_REQUEST_COMPLETED',
+                      {
+                        statusCode:
+                            result.statusCode ||
+                            200,
+                        path:
+                        url.pathname
+                      }
+                  );
 
-    } catch (err: unknown) {
-      console.error('Erro no servidor local:', err);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        statusCode: 500,
-        message: 'Erro interno no servidor local',
-        error: (err as Error).message
-      }));
+                  res.writeHead(
+                      result.statusCode ||
+                      200,
+                      {
+                        'Content-Type':
+                            'application/json',
+                        ...(result.headers ||
+                            {})
+                      }
+                  );
+
+                  res.end(
+                      result.body
+                  );
+                } catch (
+                    error: unknown
+                    ) {
+                  logError(
+                      'LOCAL_SERVER_ERROR',
+                      error
+                  );
+
+                  res.writeHead(
+                      500,
+                      {
+                        'Content-Type':
+                            'application/json'
+                      }
+                  );
+
+                  res.end(
+                      JSON.stringify({
+                        statusCode: 500,
+                        message:
+                            'Erro interno no servidor local',
+                        error:
+                            error instanceof
+                            Error
+                                ? error.message
+                                : String(
+                                    error
+                                )
+                      })
+                  );
+                }
+              }
+          );
+        }
+    );
+
+server.listen(
+    PORT,
+    () => {
+      logInfo(
+          'LOCAL_SERVER_STARTED',
+          {
+            port: PORT,
+            endpoint:
+                `http://localhost:${PORT}/auth/cpf`
+          }
+      );
+
+      console.log(
+          '===================================================='
+      );
+
+      console.log(
+          `🚀 Servidor local da Lambda rodando em: http://localhost:${PORT}`
+      );
+
+      console.log(
+          `👉 Endpoint de autenticação: POST http://localhost:${PORT}/auth/cpf`
+      );
+
+      console.log(
+          `👉 Exemplo de payload: { "cpf": "529.982.247-25" }`
+      );
+
+      console.log(
+          '===================================================='
+      );
     }
-  });
-});
-
-server.listen(PORT, () => {
-  console.log(`====================================================`);
-  console.log(`🚀 Servidor local da Lambda rodando em: http://localhost:${PORT}`);
-  console.log(`👉 Endpoint de autenticação: POST http://localhost:${PORT}/auth/cpf`);
-  console.log(`👉 Exemplo de payload: { "cpf": "529.982.247-25" }`);
-  console.log(`====================================================`);
-});
+);
